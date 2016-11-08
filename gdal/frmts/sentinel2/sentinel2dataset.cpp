@@ -720,9 +720,10 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
                                     SENTINEL2Level eLevel,
                                     const char* pszFilename,
                                     std::vector<CPLString>& osList,
+                                    bool safeCompact,
                                     std::set<int>* poSetResolutions = NULL,
                                     std::map<int, std::set<CPLString> >*
-                                                poMapResolutionsToBands = NULL)
+                                    poMapResolutionsToBands = NULL)
 {
     const char* pszNodePath =
         (eLevel == SENTINEL2_L1B ) ? "Level-1B_User_Product" :
@@ -782,7 +783,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
                                                      psIter2 = psIter2->psNext )
         {
             if( psIter2->eType != CXT_Element ||
-                !EQUAL(psIter2->pszValue, "Granules") )
+                (!EQUAL(psIter2->pszValue, "Granules") && !EQUAL(psIter2->pszValue,"Granule")) )
             {
                 continue;
             }
@@ -841,33 +842,76 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
 
             /* S2A_OPER_MSI_L1C_TL_SGS__20151024T023555_A001758_T53JLJ_N01.04 --> */
             /* S2A_OPER_MTD_L1C_TL_SGS__20151024T023555_A001758_T53JLJ */
-            CPLString osGranuleMTD = pszGranuleId;
-            if( osGranuleMTD.size() > strlen("S2A_OPER_MSI_") &&
-                osGranuleMTD[8] == '_' && osGranuleMTD[12] == '_' &&
-                osGranuleMTD[osGranuleMTD.size()-7] == '_' &&
-                osGranuleMTD[osGranuleMTD.size()-6] == 'N' )
-            {
+
+            if(!safeCompact)
+              {
+              CPLString osGranuleMTD = pszGranuleId;
+              if( osGranuleMTD.size() > strlen("S2A_OPER_MSI_") &&
+                  osGranuleMTD[8] == '_' && osGranuleMTD[12] == '_' &&
+                  osGranuleMTD[osGranuleMTD.size()-7] == '_' &&
+                  osGranuleMTD[osGranuleMTD.size()-6] == 'N' )
+                {
                 osGranuleMTD[9] = 'M';
                 osGranuleMTD[10] = 'T';
                 osGranuleMTD[11] = 'D';
                 osGranuleMTD.resize(osGranuleMTD.size()-7);
-            }
-            else
-            {
+                }
+              else
+                {
                 CPLDebug("SENTINEL2", "Invalid granule ID: %s", pszGranuleId);
                 continue;
-            }
-            osGranuleMTD += ".xml";
+                }
+              osGranuleMTD += ".xml";
+              
+              const char chSeparator = SENTINEL2GetPathSeparator(osDirname);
+              CPLString osGranuleMTDPath = osDirname;
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath += "GRANULE";
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath += pszGranuleId;
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath += osGranuleMTD;
+              osList.push_back(osGranuleMTDPath);
+              }
+            else
+              {
+              // Retrieve first image path
+              CPLXMLNode* psIter3 = psIter2->psChild;
+              while(psIter3 != NULL && (psIter3->eType != CXT_Element ||
+                                        !EQUAL(psIter3->pszValue, "IMAGE_FILE")))
+                {
+                psIter3 = psIter3->psNext;
+                }
 
-            const char chSeparator = SENTINEL2GetPathSeparator(osDirname);
-            CPLString osGranuleMTDPath = osDirname;
-            osGranuleMTDPath += chSeparator;
-            osGranuleMTDPath += "GRANULE";
-            osGranuleMTDPath += chSeparator;
-            osGranuleMTDPath += pszGranuleId;
-            osGranuleMTDPath += chSeparator;
-            osGranuleMTDPath += osGranuleMTD;
-            osList.push_back(osGranuleMTDPath);
+              
+              if(psIter3 == NULL)
+                {
+                CPLDebug("SENTINEL2","Could not find IMAGE_FILE node in granule, skipping");
+                }
+              
+
+              CPLString firstImagePath = CPLGetXMLValue(psIter3, NULL, "");
+              const char chSeparator = SENTINEL2GetPathSeparator(osDirname);
+              
+              CPLStringList firstImagePathSplitted = CSLTokenizeString2(firstImagePath,&chSeparator,0);
+
+              if(firstImagePathSplitted.Count()<2)
+                {
+                CPLDebug("SENTINEL2","Granule path should have at least 2 components, skipping ...");
+                continue;
+                }
+              
+              // TODO: Check that firstImagePath has at least 2 elements
+              CPLString osGranuleMTDPath = osDirname;
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath += firstImagePathSplitted[0];
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath += firstImagePathSplitted[1];
+              osGranuleMTDPath += chSeparator;
+              osGranuleMTDPath+="MTD_TL.xml";
+              
+              osList.push_back(osGranuleMTDPath);
+              }            
         }
     }
 
@@ -1214,6 +1258,13 @@ GDALDataset *SENTINEL2Dataset::OpenL1BUserProduct( GDALOpenInfo * poOpenInfo )
         return NULL;
     }
 
+    bool isSafeCompact = false;
+    CPLString oFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+      {
+      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      }
+     
     std::set<int> oSetResolutions;
     std::map<int, std::set<CPLString> > oMapResolutionsToBands;
     if( !SENTINEL2GetResolutionSet(psProductInfo,
@@ -1227,7 +1278,8 @@ GDALDataset *SENTINEL2Dataset::OpenL1BUserProduct( GDALOpenInfo * poOpenInfo )
     if( !SENTINEL2GetGranuleList(psRoot,
                                  SENTINEL2_L1B,
                                  poOpenInfo->pszFilename,
-                                 aosGranuleList) )
+                                 aosGranuleList,
+                                 isSafeCompact) )
     {
         return NULL;
     }
@@ -2099,6 +2151,13 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2A( const char* pszFilename,
         return NULL;
     }
 
+    bool isSafeCompact = false;
+    CPLString oFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+      {
+      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      }
+
     std::set<int> oSetResolutions;
     std::map<int, std::set<CPLString> > oMapResolutionsToBands;
     if( eLevel == SENTINEL2_L1C &&
@@ -2114,6 +2173,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2A( const char* pszFilename,
                                  eLevel,
                                  pszFilename,
                                  aosGranuleList,
+                                 isSafeCompact,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
                                                     &oSetResolutions,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
@@ -2601,6 +2661,23 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
     if( psRoot == NULL )
         return NULL;
 
+    CPLXMLNode* psProductInfo = CPLGetXMLNode(psRoot,
+                            "=Level-1B_User_Product.General_Info.Product_Info");
+    if( psProductInfo == NULL )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s",
+                 "=*_User_Product.General_Info.Product_Info");
+        return NULL;
+    }
+
+    bool isSafeCompact = false;
+    CPLString oFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+      {
+      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      }
+    
+
     char* pszOriginalXML = CPLSerializeXMLTree(psRoot);
     CPLString osOriginalXML;
     if( pszOriginalXML )
@@ -2617,6 +2694,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
                                  eLevel,
                                  osFilename,
                                  aosGranuleList,
+                                 isSafeCompact,
                                  NULL,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
                                                     &oMapResolutionsToBands) )
