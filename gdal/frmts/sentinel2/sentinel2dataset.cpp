@@ -1043,6 +1043,24 @@ char** SENTINEL2GetUserProductMetadata( CPLXMLNode* psMainMTD,
 }
 
 /************************************************************************/
+/*                        SENTINEL2GetProductFormat()                   */
+/************************************************************************/
+static bool SENTINEL2GetProductFormat(CPLXMLNode * psProductInfo, CPLString & format)
+{
+  CPLXMLNode* psFormat = CPLGetXMLNode(psProductInfo,
+                                           "Query_Options.PRODUCT_FORMAT");
+
+  if(psFormat == NULL)
+    {
+    CPLError(CE_Failure, CPLE_AppDefined, "Cannot find PRODUCT_FORMAT node");
+    return false;
+    }
+  
+  format = CPLGetXMLValue(psFormat, NULL, "");
+  return true;
+}
+
+/************************************************************************/
 /*                        SENTINEL2GetResolutionSet()                   */
 /************************************************************************/
 
