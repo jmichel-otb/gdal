@@ -2658,15 +2658,19 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
     aosNonJP2Files.push_back(osFilename);
 
     CPLXMLNode *psRoot = CPLParseXMLFile( osFilename );
+  
     if( psRoot == NULL )
         return NULL;
 
-    CPLXMLNode* psProductInfo = CPLGetXMLNode(psRoot,
-                            "=Level-1B_User_Product.General_Info.Product_Info");
+    CPLStripXMLNamespace(psRoot, NULL, TRUE);
+    
+    const char* pszNodePath = (eLevel == SENTINEL2_L1C ) ?
+      "=Level-1C_User_Product.General_Info.Product_Info" :
+      "=Level-2A_User_Product.General_Info.L2A_Product_Info";
+    CPLXMLNode* psProductInfo = CPLGetXMLNode(psRoot, pszNodePath);
     if( psProductInfo == NULL )
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s",
-                 "=*_User_Product.General_Info.Product_Info");
+        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s", pszNodePath);
         return NULL;
     }
 
