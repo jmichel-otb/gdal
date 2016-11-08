@@ -1056,38 +1056,51 @@ static bool SENTINEL2GetResolutionSet(CPLXMLNode* psProductInfo,
                                            "Query_Options.Band_List");
     if( psBandList == NULL )
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s",
-                 "Query_Options.Band_List");
-        return false;
+        CPLDebug("SENTINEL2", "Cannot find %s",
+                 "Query_Options.Band_List, using default band list");
+        
+        for(unsigned int i = 0; i < NB_BANDS; ++i)
+          {
+          const SENTINEL2BandDescription * psBandDesc = &asBandDesc[i];
+          oSetResolutions.insert( psBandDesc->nResolution );
+          CPLString osName = psBandDesc->pszBandName + 1; /* skip B character */
+          if( atoi(osName) < 10 )
+            osName = "0" + osName;
+          oMapResolutionsToBands[psBandDesc->nResolution].insert(osName);
+          }
     }
-
-    for(CPLXMLNode* psIter = psBandList->psChild; psIter != NULL;
-                                                  psIter = psIter->psNext )
-    {
+    else
+      {
+      for(CPLXMLNode* psIter = psBandList->psChild; psIter != NULL;
+          psIter = psIter->psNext )
+        {
         if( psIter->eType != CXT_Element ||
             !EQUAL(psIter->pszValue, "BAND_NAME") )
-        {
-            continue;
-        }
+          {
+          continue;
+          }
         const char* pszBandName = CPLGetXMLValue(psIter, NULL, "");
-        const SENTINEL2BandDescription* psBandDesc =
-                                        SENTINEL2GetBandDesc(pszBandName);
+
+ 
+        const SENTINEL2BandDescription * psBandDesc = SENTINEL2GetBandDesc(pszBandName);
         if( psBandDesc == NULL )
-        {
-            CPLDebug("SENTINEL2", "Unknown band name %s", pszBandName);
-            continue;
-        }
+          {
+          CPLDebug("SENTINEL2", "Unknown band name %s", pszBandName);
+          continue;
+          }
         oSetResolutions.insert( psBandDesc->nResolution );
         CPLString osName = psBandDesc->pszBandName + 1; /* skip B character */
         if( atoi(osName) < 10 )
-            osName = "0" + osName;
+          osName = "0" + osName;
         oMapResolutionsToBands[psBandDesc->nResolution].insert(osName);
-    }
+        }
+      }
     if( oSetResolutions.size() == 0 )
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find any band");
-        return false;
-    }
+      {
+      CPLError(CE_Failure, CPLE_AppDefined, "Cannot find any band");
+      return false;
+      }
+      
     return true;
 }
 
@@ -2607,32 +2620,45 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
             "=Level-1C_User_Product.General_Info.Product_Info.Query_Options.Band_List");
         if( psBandList == NULL )
         {
-            CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s",
+            CPLDebug("SENTINEL2", "Cannot find %s",
                     "Query_Options.Band_List");
-            return NULL;
+            
+            for(unsigned int i = 0; i < NB_BANDS; ++i)
+              {
+              const SENTINEL2BandDescription * psBandDesc = &asBandDesc[i];
+              if( psBandDesc->nResolution != nSubDSPrecision )
+                continue;
+              CPLString osName = psBandDesc->pszBandName + 1; /* skip B character */
+              if( atoi(osName) < 10 )
+                osName = "0" + osName;
+              oSetBands.insert(osName);
+              }
         }
-
-        for(CPLXMLNode* psIter = psBandList->psChild; psIter != NULL;
-                                                      psIter = psIter->psNext )
-        {
+        else
+          {
+          
+          for(CPLXMLNode* psIter = psBandList->psChild; psIter != NULL;
+              psIter = psIter->psNext )
+            {
             if( psIter->eType != CXT_Element ||
                 !EQUAL(psIter->pszValue, "BAND_NAME") )
-                continue;
-            const char* pszBandName = CPLGetXMLValue(psIter, NULL, "");
-            const SENTINEL2BandDescription* psBandDesc =
-                                SENTINEL2GetBandDesc(pszBandName);
+              continue;
+            const char* pszBandName = CPLGetXMLValue(psIter, NULL,"");
+    
+            const SENTINEL2BandDescription * psBandDesc = SENTINEL2GetBandDesc(pszBandName);
             if( psBandDesc == NULL )
             {
                 CPLDebug("SENTINEL2", "Unknown band name %s", pszBandName);
                 continue;
             }
             if( psBandDesc->nResolution != nSubDSPrecision )
-                continue;
+              continue;
             CPLString osName = psBandDesc->pszBandName + 1; /* skip B character */
             if( atoi(osName) < 10 )
-                osName = "0" + osName;
+              osName = "0" + osName;
             oSetBands.insert(osName);
-        }
+            }
+          }
         if( oSetBands.size() == 0 )
             return NULL;
     }
