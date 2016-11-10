@@ -40,6 +40,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <iostream>
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -159,6 +160,7 @@ class SENTINEL2Dataset : public VRTDataset
         static SENTINEL2Dataset *CreateL1CL2ADataset(
                 SENTINEL2Level eLevel,
                 const std::vector<CPLString>& aosGranuleList,
+                const std::vector<CPLString>& aosTileBaseNameList,
                 std::vector<CPLString>& aosNonJP2Files,
                 int nSubDSPrecision,
                 bool bIsPreview,
@@ -720,6 +722,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
                                     SENTINEL2Level eLevel,
                                     const char* pszFilename,
                                     std::vector<CPLString>& osList,
+                                    std::vector<CPLString>& osTileBaseNameList,
                                     bool safeCompact,
                                     std::set<int>* poSetResolutions = NULL,
                                     std::map<int, std::set<CPLString> >*
@@ -846,6 +849,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
             if(!safeCompact)
               {
               CPLString osGranuleMTD = pszGranuleId;
+              CPLString osTileBaseName = CPLGetBasename(osDirname);
               if( osGranuleMTD.size() > strlen("S2A_OPER_MSI_") &&
                   osGranuleMTD[8] == '_' && osGranuleMTD[12] == '_' &&
                   osGranuleMTD[osGranuleMTD.size()-7] == '_' &&
@@ -855,6 +859,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
                 osGranuleMTD[10] = 'T';
                 osGranuleMTD[11] = 'D';
                 osGranuleMTD.resize(osGranuleMTD.size()-7);
+               
                 }
               else
                 {
@@ -872,6 +877,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
               osGranuleMTDPath += chSeparator;
               osGranuleMTDPath += osGranuleMTD;
               osList.push_back(osGranuleMTDPath);
+              osTileBaseNameList.push_back(osTileBaseName);
               }
             else
               {
@@ -895,9 +901,9 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
               
               CPLStringList firstImagePathSplitted = CSLTokenizeString2(firstImagePath,&chSeparator,0);
 
-              if(firstImagePathSplitted.Count()<2)
+              if(firstImagePathSplitted.Count()<4)
                 {
-                CPLDebug("SENTINEL2","Granule path should have at least 2 components, skipping ...");
+                CPLDebug("SENTINEL2","Granule path should have at least 4 components, skipping ...");
                 continue;
                 }
               
@@ -909,8 +915,13 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
               osGranuleMTDPath += firstImagePathSplitted[1];
               osGranuleMTDPath += chSeparator;
               osGranuleMTDPath+="MTD_TL.xml";
-              
               osList.push_back(osGranuleMTDPath);
+            
+              CPLString osTileBaseName = CPLGetBasename(firstImagePathSplitted[3]);
+
+              osTileBaseName = osTileBaseName.substr(0,osTileBaseName.size()-4);
+              
+              osTileBaseNameList.push_back(osTileBaseName);
               }            
         }
     }
@@ -928,7 +939,8 @@ char** SENTINEL2GetUserProductMetadata( CPLXMLNode* psMainMTD,
 {
     CPLStringList aosList;
 
-    CPLXMLNode* psRoot =  CPLGetXMLNode(psMainMTD,
+    CPLXMLNode* psRoot =  CPLGetXMLNode
+      (psMainMTD,
                                         CPLSPrintf("=%s", pszRootNode));
     if( psRoot == NULL )
     {
@@ -1275,10 +1287,13 @@ GDALDataset *SENTINEL2Dataset::OpenL1BUserProduct( GDALOpenInfo * poOpenInfo )
     }
 
     std::vector<CPLString> aosGranuleList;
+    std::vector<CPLString> aosTileBaseList;
+    
     if( !SENTINEL2GetGranuleList(psRoot,
                                  SENTINEL2_L1B,
                                  poOpenInfo->pszFilename,
                                  aosGranuleList,
+                                 aosTileBaseList,
                                  isSafeCompact) )
     {
         return NULL;
@@ -1552,14 +1567,22 @@ static CPLString SENTINEL2GetMainMTDFilenameFromGranuleMTD(const char* pszFilena
     CPLString osMainMTD;
     for(char** papszIter = papszContents; papszIter && *papszIter; ++papszIter)
     {
-        if( strlen(*papszIter) >= strlen("S2A_XXXX_MTD") &&
-            (STARTS_WITH_CI(*papszIter, "S2A_") ||
-             STARTS_WITH_CI(*papszIter, "S2B_")) &&
-             EQUALN(*papszIter + strlen("S2A_XXXX"), "_MTD", 4) )
+    // This check is needed because otherwise generated ovr files may
+    // be selected instead of the main MTD file
+    if(EQUALN(CPLGetExtension(*papszIter),"xml",3))
+      {
+     
+      
+      if( (strlen(*papszIter) >= strlen("S2A_XXXX_MTD") &&
+          (STARTS_WITH_CI(*papszIter, "S2A_") ||
+           STARTS_WITH_CI(*papszIter, "S2B_")) &&
+           EQUALN(*papszIter + strlen("S2A_XXXX"), "_MTD", 4)) ||
+          (STARTS_WITH_CI(*papszIter,"MTD_MSI") && strlen(*papszIter) == strlen("MTD_MSIXXX.xml")))
         {
-            osMainMTD = CPLFormFilename(osTopDir, *papszIter, NULL);
+        osMainMTD = CPLFormFilename(osTopDir, *papszIter, NULL);
             break;
         }
+      }
     }
     CSLDestroy(papszContents);
     return osMainMTD;
@@ -1582,9 +1605,7 @@ static void SENTINEL2GetResolutionSetAndMainMDFromGranule(
 
     // Parse product MTD if available
     papszMD = NULL;
-    if( osMainMTD.size() != 0 &&
-        /* env var for debug only */
-        CPLTestBool(CPLGetConfigOption("SENTINEL2_USE_MAIN_MTD", "YES")) )
+    if( osMainMTD.size() != 0 )
     {
         CPLXMLNode *psRootMainMTD = CPLParseXMLFile( osMainMTD );
         if( psRootMainMTD != NULL )
@@ -2169,10 +2190,12 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2A( const char* pszFilename,
     }
 
     std::vector<CPLString> aosGranuleList;
+    std::vector<CPLString> aosTileBaseList;
     if( !SENTINEL2GetGranuleList(psRoot,
                                  eLevel,
                                  pszFilename,
                                  aosGranuleList,
+                                 aosTileBaseList,
                                  isSafeCompact,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
                                                     &oSetResolutions,
@@ -2692,12 +2715,14 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
     CPLStripXMLNamespace(psRoot, NULL, TRUE);
 
     std::vector<CPLString> aosGranuleList;
+    std::vector<CPLString> aosTileBaseList;
     std::set<int> oSetResolutions;
     std::map<int, std::set<CPLString> > oMapResolutionsToBands;
     if( !SENTINEL2GetGranuleList(psRoot,
                                  eLevel,
                                  osFilename,
                                  aosGranuleList,
+                                 aosTileBaseList,
                                  isSafeCompact,
                                  NULL,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
@@ -2803,6 +2828,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
 
     SENTINEL2Dataset* poDS = CreateL1CL2ADataset(eLevel,
                                                  aosGranuleList,
+                                                 aosTileBaseList,
                                                  aosNonJP2Files,
                                                  nSubDSPrecision,
                                                  bIsPreview,
@@ -2964,6 +2990,7 @@ void SENTINEL2Dataset::AddL1CL2ABandMetadata(SENTINEL2Level eLevel,
 SENTINEL2Dataset* SENTINEL2Dataset::CreateL1CL2ADataset(
                 SENTINEL2Level eLevel,
                 const std::vector<CPLString>& aosGranuleList,
+                const std::vector<CPLString>& aosTileBaseNameList,
                 std::vector<CPLString>& aosNonJP2Files,
                 int nSubDSPrecision,
                 bool bIsPreview,
@@ -3107,7 +3134,7 @@ SENTINEL2Dataset* SENTINEL2Dataset::CreateL1CL2ADataset(
             const SENTINEL2GranuleInfo& oGranuleInfo = aosGranuleInfoList[iSrc];
             CPLString osTile(SENTINEL2GetTilename(
                     oGranuleInfo.osPath,
-                    CPLGetFilename(oGranuleInfo.osPath),
+                    aosTileBaseNameList[iSrc],
                     osBandName,
                     bIsPreview,
                     (eLevel == SENTINEL2_L1C) ? 0 : nSubDSPrecision));
@@ -3274,10 +3301,74 @@ GDALDataset* SENTINEL2Dataset::OpenL1CTileSubdataset( GDALOpenInfo * poOpenInfo 
 /* -------------------------------------------------------------------- */
 /*      Create dataset.                                                 */
 /* -------------------------------------------------------------------- */
-
+    CPLXMLNode* psProductInfo = CPLGetXMLNode(psRootMainMTD,
+                            "=Level-1C_User_Product.General_Info.Product_Info");
+    if( psProductInfo == NULL )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find %s",
+                 "=Level-1C_User_Product.General_Info.Product_Info");
+        return NULL;
+    }
+    
+    bool isSafeCompact = false;
+    CPLString oFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+      {
+      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      }
+    
+    
     std::vector<CPLString> aosGranuleList;
     aosGranuleList.push_back(osFilename);
 
+    std::vector<CPLString> aosTileBaseNameList;
+
+    // If we are in safe mode, we need to read main MTD for ImageID
+    if(isSafeCompact)
+      {
+      // Retrieve first image path
+      CPLXMLNode* psIter = CPLGetXMLNode(psProductInfo,"Product_Organisation.Granule_List.Granule")->psChild;
+      
+      if(psIter == NULL)
+        {
+        CPLDebug("SENTINEL2","Could not find IMAGE_FILE node in granule");
+        return NULL;
+        }
+
+      
+      while(psIter != NULL && (psIter->eType != CXT_Element ||
+                                !EQUAL(psIter->pszValue, "IMAGE_FILE")))
+        {
+        psIter = psIter->psNext;
+        }
+      
+      if(psIter == NULL)
+        {
+        CPLDebug("SENTINEL2","Could not find IMAGE_FILE node in granule");
+        return NULL;
+        }
+      
+      CPLString firstImagePath = CPLGetXMLValue(psIter, NULL, "");
+      const char chSeparator = SENTINEL2GetPathSeparator(osFilename);
+
+      CPLStringList firstImagePathSplitted = CSLTokenizeString2(firstImagePath,&chSeparator,0);
+      
+      if(firstImagePathSplitted.Count()<4)
+        {
+        CPLDebug("SENTINEL2","Granule path should have at least 4 components, skipping ...");
+        return NULL;
+        }
+      CPLString osTileBaseName = CPLGetBasename(firstImagePathSplitted[3]);
+      osTileBaseName = osTileBaseName.substr(0,osTileBaseName.size()-4);
+      aosTileBaseNameList.push_back(osTileBaseName);
+      }
+    else
+      {
+      // Else, we need to use basename(osFilename)
+      aosTileBaseNameList.push_back(CPLGetBasename(osFilename));
+      }
+
+    
     const int nSaturatedVal = atoi(CSLFetchNameValueDef(poTmpDS->GetMetadata(),
                                                   "SPECIAL_VALUE_SATURATED", "-1"));
     const int nNodataVal = atoi(CSLFetchNameValueDef(poTmpDS->GetMetadata(),
@@ -3289,6 +3380,7 @@ GDALDataset* SENTINEL2Dataset::OpenL1CTileSubdataset( GDALOpenInfo * poOpenInfo 
     std::vector<CPLString> aosNonJP2Files;
     SENTINEL2Dataset* poDS = CreateL1CL2ADataset(SENTINEL2_L1C,
                                                  aosGranuleList,
+                                                 aosTileBaseNameList,
                                                  aosNonJP2Files,
                                                  nSubDSPrecision,
                                                  bIsPreview,
