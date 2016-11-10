@@ -40,7 +40,6 @@
 #include <map>
 #include <set>
 #include <vector>
-#include <iostream>
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
