@@ -720,9 +720,9 @@ static char SENTINEL2GetPathSeparator(const char* pszBasename)
 static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
                                     SENTINEL2Level eLevel,
                                     const char* pszFilename,
-                                    std::vector<CPLString>& osList,
-                                    std::vector<CPLString>& osTileBaseNameList,
-                                    bool safeCompact,
+                                    std::vector<CPLString>& aosList,
+                                    std::vector<CPLString>& aosTileBaseNameList,
+                                    bool bSafeCompact,
                                     std::set<int>* poSetResolutions = NULL,
                                     std::map<int, std::set<CPLString> >*
                                     poMapResolutionsToBands = NULL)
@@ -845,7 +845,7 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
             /* S2A_OPER_MSI_L1C_TL_SGS__20151024T023555_A001758_T53JLJ_N01.04 --> */
             /* S2A_OPER_MTD_L1C_TL_SGS__20151024T023555_A001758_T53JLJ */
 
-            if(!safeCompact)
+            if(!bSafeCompact)
               {
               CPLString osGranuleMTD = pszGranuleId;
               CPLString osTileBaseName = CPLGetBasename(osDirname);
@@ -875,8 +875,8 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
               osGranuleMTDPath += pszGranuleId;
               osGranuleMTDPath += chSeparator;
               osGranuleMTDPath += osGranuleMTD;
-              osList.push_back(osGranuleMTDPath);
-              osTileBaseNameList.push_back(osTileBaseName);
+              aosList.push_back(osGranuleMTDPath);
+              aosTileBaseNameList.push_back(osTileBaseName);
               }
             else
               {
@@ -914,13 +914,13 @@ static bool SENTINEL2GetGranuleList(CPLXMLNode* psMainMTD,
               osGranuleMTDPath += firstImagePathSplitted[1];
               osGranuleMTDPath += chSeparator;
               osGranuleMTDPath+="MTD_TL.xml";
-              osList.push_back(osGranuleMTDPath);
+              aosList.push_back(osGranuleMTDPath);
             
               CPLString osTileBaseName = CPLGetBasename(firstImagePathSplitted[3]);
 
               osTileBaseName = osTileBaseName.substr(0,osTileBaseName.size()-4);
               
-              osTileBaseNameList.push_back(osTileBaseName);
+              aosTileBaseNameList.push_back(osTileBaseName);
               }            
         }
     }
@@ -1100,7 +1100,7 @@ char** SENTINEL2GetUserProductMetadata( CPLXMLNode* psMainMTD,
 /************************************************************************/
 /*                        SENTINEL2GetProductFormat()                   */
 /************************************************************************/
-static bool SENTINEL2GetProductFormat(CPLXMLNode * psProductInfo, CPLString & format)
+static bool SENTINEL2GetProductFormat(CPLXMLNode * psProductInfo, CPLString & osFormat)
 {
   CPLXMLNode* psFormat = CPLGetXMLNode(psProductInfo,
                                            "Query_Options.PRODUCT_FORMAT");
@@ -1111,7 +1111,7 @@ static bool SENTINEL2GetProductFormat(CPLXMLNode * psProductInfo, CPLString & fo
     return false;
     }
   
-  format = CPLGetXMLValue(psFormat, NULL, "");
+  osFormat = CPLGetXMLValue(psFormat, NULL, "");
   return true;
 }
 
@@ -1269,11 +1269,11 @@ GDALDataset *SENTINEL2Dataset::OpenL1BUserProduct( GDALOpenInfo * poOpenInfo )
         return NULL;
     }
 
-    bool isSafeCompact = false;
-    CPLString oFormat;
-    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+    bool bIsSafeCompact = false;
+    CPLString osFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,osFormat))
       {
-      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      bIsSafeCompact = EQUAL(osFormat,"SAFE_COMPACT");
       }
      
     std::set<int> oSetResolutions;
@@ -1293,7 +1293,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1BUserProduct( GDALOpenInfo * poOpenInfo )
                                  poOpenInfo->pszFilename,
                                  aosGranuleList,
                                  aosTileBaseList,
-                                 isSafeCompact) )
+                                 bIsSafeCompact) )
     {
         return NULL;
     }
@@ -2171,11 +2171,11 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2A( const char* pszFilename,
         return NULL;
     }
 
-    bool isSafeCompact = false;
-    CPLString oFormat;
-    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+    bool bIsSafeCompact = false;
+    CPLString osFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,osFormat))
       {
-      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      bIsSafeCompact = EQUAL(osFormat,"SAFE_COMPACT");
       }
 
     std::set<int> oSetResolutions;
@@ -2195,7 +2195,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2A( const char* pszFilename,
                                  pszFilename,
                                  aosGranuleList,
                                  aosTileBaseList,
-                                 isSafeCompact,
+                                 bIsSafeCompact,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
                                                     &oSetResolutions,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
@@ -2696,11 +2696,11 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
         return NULL;
     }
 
-    bool isSafeCompact = false;
-    CPLString oFormat;
-    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+    bool bIsSafeCompact = false;
+    CPLString osFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,osFormat))
       {
-      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      bIsSafeCompact = EQUAL(osFormat,"SAFE_COMPACT");
       }
     
 
@@ -2722,7 +2722,7 @@ GDALDataset *SENTINEL2Dataset::OpenL1C_L2ASubdataset( GDALOpenInfo * poOpenInfo,
                                  osFilename,
                                  aosGranuleList,
                                  aosTileBaseList,
-                                 isSafeCompact,
+                                 bIsSafeCompact,
                                  NULL,
                                  (eLevel == SENTINEL2_L1C) ? NULL :
                                                     &oMapResolutionsToBands) )
@@ -3309,11 +3309,11 @@ GDALDataset* SENTINEL2Dataset::OpenL1CTileSubdataset( GDALOpenInfo * poOpenInfo 
         return NULL;
     }
     
-    bool isSafeCompact = false;
-    CPLString oFormat;
-    if(SENTINEL2GetProductFormat(psProductInfo,oFormat))
+    bool bIsSafeCompact = false;
+    CPLString osFormat;
+    if(SENTINEL2GetProductFormat(psProductInfo,osFormat))
       {
-      isSafeCompact = EQUAL(oFormat,"SAFE_COMPACT");
+      bIsSafeCompact = EQUAL(osFormat,"SAFE_COMPACT");
       }
     
     
@@ -3323,7 +3323,7 @@ GDALDataset* SENTINEL2Dataset::OpenL1CTileSubdataset( GDALOpenInfo * poOpenInfo 
     std::vector<CPLString> aosTileBaseNameList;
 
     // If we are in safe mode, we need to read main MTD for ImageID
-    if(isSafeCompact)
+    if(bIsSafeCompact)
       {
       // Retrieve first image path
       CPLXMLNode* psIter = CPLGetXMLNode(psProductInfo,"Product_Organisation.Granule_List.Granule")->psChild;
@@ -3347,17 +3347,17 @@ GDALDataset* SENTINEL2Dataset::OpenL1CTileSubdataset( GDALOpenInfo * poOpenInfo 
         return NULL;
         }
       
-      CPLString firstImagePath = CPLGetXMLValue(psIter, NULL, "");
+      CPLString osFirstImagePath = CPLGetXMLValue(psIter, NULL, "");
       const char chSeparator = SENTINEL2GetPathSeparator(osFilename);
 
-      CPLStringList firstImagePathSplitted = CSLTokenizeString2(firstImagePath,&chSeparator,0);
+      CPLStringList aosFirstImagePathSplitted = CSLTokenizeString2(osFirstImagePath,&chSeparator,0);
       
-      if(firstImagePathSplitted.Count()<4)
+      if(aosFirstImagePathSplitted.Count()<4)
         {
         CPLDebug("SENTINEL2","Granule path should have at least 4 components, skipping ...");
         return NULL;
         }
-      CPLString osTileBaseName = CPLGetBasename(firstImagePathSplitted[3]);
+      CPLString osTileBaseName = CPLGetBasename(aosFirstImagePathSplitted[3]);
       osTileBaseName = osTileBaseName.substr(0,osTileBaseName.size()-4);
       aosTileBaseNameList.push_back(osTileBaseName);
       }
